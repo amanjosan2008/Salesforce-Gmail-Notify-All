@@ -1,4 +1,6 @@
-#!/home/pi/berryconda3/bin/python3
+#!/usr/local/lib/python3.6
+# Use Dictionary instead of List
+# line 57-61: reduce code lines to one line
 
 from simple_salesforce import Salesforce
 from slackclient import SlackClient
@@ -10,10 +12,6 @@ import credential, traceback
 # Enable Debug Logging to Debug.log file
 def debug():
     return False
-
-# Logging Function
-def en_log():
-    return True
 
 # Function to print date
 def date():
@@ -27,31 +25,31 @@ def is_connected():
     s = socket.create_connection((host, 80), 2)
     return True
   except:
-    if en_log():
-        log('Error: Internet Connection down, Retrying after 60 seconds\n')
+    log('Error: Internet Connection down, Retrying after 60 seconds\n')
     time.sleep(60)
     return False
 
 # SalesForce Case list dump
 def sf():
     global CASES_DATA
-    with open('users.ini') as f:
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    users = os.path.join(dir_path, "users.ini")
+    with open(users) as f:
         CASES_DATA = [x.strip().split(':') for x in f.readlines()]
     try:
         sf = Salesforce(username=credential.username, password=credential.password, security_token=credential.security_token)
     except:
-        if en_log():
-            log('Fatal: Invalid Credentials/Token; Exitting\n')
-        sys.exit()
+        log('Fatal: Invalid Credentials/Token; Exitting\n')
+        time.sleep(60)
+        return
     j = 0
     for user,ownerid in CASES_DATA:
         lst = []
-        query = "SELECT CaseNumber,Subject,IsClosed FROM Case WHERE OwnerId = '%s'" %ownerid
+        query = "SELECT CaseNumber FROM Case WHERE OwnerId = '%s'" %ownerid
         try:
             prt = sf.query_all(query)
         except simple_salesforce.exceptions.SalesforceGeneralError:
-            if en_log():
-                log('Salesforce Error, retrying in 60 seconds\n')
+            log('Salesforce Error, retrying in 60 seconds\n')
             time.sleep(60)
             pass
         for i in range(len(prt['records'])):
@@ -59,7 +57,6 @@ def sf():
         if CASES_DATA[j][0]==user:
             CASES_DATA[j].append(lst)
         j += 1
-
 
 # Function to get & save latest MessID
 def id():
@@ -71,31 +68,25 @@ def id():
         global b
         b = int(id_list[-1])
     except imaplib.IMAP4.abort:
-        if en_log():
-            log('Imaplib.IMAP4.abort Error: Retrying in 60 seconds\n')
+        log('Imaplib.IMAP4.abort Error: Retrying in 60 seconds\n')
         time.sleep(60)
         mailbox()
-        if en_log():
-            log('Re-connected to the Mail Server!\n')
+        log('Re-connected to the Mail Server!\n')
         return
     except TimeoutError:
-        if en_log():
-            log('TimeoutError: Retrying in 60 seconds\n')
+        log('TimeoutError: Retrying in 60 seconds\n')
         time.sleep(60)
         return
     except OSError:
-        if en_log():
-            log('OSError: Retrying in 60 seconds\n')
+        log('OSError: Retrying in 60 seconds\n')
         time.sleep(60)
         return
     except BrokenPipeError:
-        if en_log():
-            log('BrokenPipeError: Retrying in 60 seconds\n')
+        log('BrokenPipeError: Retrying in 60 seconds\n')
         time.sleep(60)
         return
     except:
-        if en_log():
-            log(traceback.print_exc())
+        log(traceback.print_exc())
         sys.exit()
 
 # Current Mail Fetch Details
@@ -109,8 +100,7 @@ def write_b():
             debug_log('Write b='+str(b)+'\n')         # Debugging
         f.close()
     else:
-        if en_log():
-            log('Error: Rollback event occured, ignored\n')
+        log('Error: Rollback event occured, ignored\n')
 
 # Fetch Last Seen MessID
 def read_a():
@@ -121,8 +111,7 @@ def read_a():
     global a
     a = int(l[0])
     f.close()
-    if en_log():
-        log('Last processed MessID: '+str(a)+'\n')
+    log('Last processed MessID: '+str(a)+'\n')
 
 # Fetch new mails function
 def fetchmail():
@@ -152,9 +141,8 @@ def fetchmail():
                         except UnicodeDecodeError as u:
                             string = body.decode('ISO-8859-1')[0:200]
                         except:
-                            if en_log():
-                                log('Exception: '+str(u)+'\n')
-                                log('part.get_content_type = '+part.get_content_type()+'\n')
+                            log('Exception: '+str(u)+'\n')
+                            log('part.get_content_type = '+part.get_content_type()+'\n')
                             string = "0"
                     else:
                         string = "0"
@@ -164,27 +152,49 @@ def fetchmail():
                 #print(string)
                 #print(str(RAW_SUB[0]))
                 #print(str(RAW_SUB[0].strip()))
+                #IGNORE_EMAILS = ['internal-case-support@avinetworks.com',
+                #        'noreply@salesforce.com',
+                #        'avinetworks-support@avinetworks.com',
+                #        'support-notification@avinetworks.com']
                 try:
                     c = str(RAW_SUB[0].strip())
                     #print(c)
+                    #################### Case Update Notification #######################
                     for j in range(len(CASES_DATA)):
                         if c in CASES_DATA[j][2]:
                             #print(j, CASES_DATA[j][0], CASES_DATA[j][2])
-                            if en_log():
-                                log(local_date+'['+str(i)+'] '+ CASES_DATA[j][0] +' Case:'+c+'\nFrom   : '+email_from+'\nSubject: '+email_subject+'\n')
-                            slack(local_date+' - '+email_subject+' ('+email_from+')', CASES_DATA[j][0], ':scroll:')
-                    if 'New Case:' in string:
-                        if en_log():
-                            log(local_date+'['+str(i)+']New Case in QUEUE - Case: ' + c+'\n')
-                        slack(local_date+' New '+email_subject, credential.channel, ':briefcase:')
+                            if any(re.findall('|'.join(credential.IGNORE_EMAILS),email_from)):
+                                if 'internal-case-support@avinetworks.com' in email_from:
+                                    if 'Case Attachment - ' in email_subject:
+                                        log(local_date+'['+str(i)+'] ALERT:'+ CASES_DATA[j][0] +' Case:'+c+' From   : '+email_from+' Subject: '+email_subject+'\n')
+                                        slack(local_date+' - '+email_subject+' ('+email_from+')', CASES_DATA[j][0], ':scroll:')
+                                    else:
+                                        log(local_date+'['+str(i)+'] IGNORED ALERT: '+ CASES_DATA[j][0] +' Case:'+c+' From   : '+email_from+' Subject: '+email_subject+'\n')
+                                else:
+                                    log(local_date+'['+str(i)+'] IGNORED ALERT: '+ CASES_DATA[j][0] +' Case:'+c+' From   : '+email_from+' Subject: '+email_subject+'\n')
+                            else:
+                                if "Sandbox: Case - " in email_subject:
+                                    log(local_date+'['+str(i)+'] IGNORED ALERT: Sandbox Case: ' + c+'\n')
+                                else:
+                                    log(local_date+'['+str(i)+'] ALERT:'+ CASES_DATA[j][0] +' Case:'+c+' From   : '+email_from+' Subject: '+email_subject+'\n')
+                                    slack(local_date+' - '+email_subject+' ('+email_from+')', CASES_DATA[j][0], ':scroll:')
+                    #################### New Case Notification #######################
+                    if "New Case Assigned:" in email_subject:
+                        #if re.search(EMAIL_ID, email_to):
+                            #sf()
+                            log(local_date+'['+str(i)+'] '+ 'My Queue Case: '+c+' Subject: '+email_subject+'\n')
+                    elif 'New Case:' in string:
+                        if "Sandbox: Case - " in email_subject:
+                            log(local_date+'['+str(i)+'] IGNORED ALERT: Sandbox Case: ' + c+'\n')
+                        else:
+                            log(local_date+'['+str(i)+'] New Case in QUEUE - Case: ' + c+'\n')
+                            slack(local_date+' New '+email_subject, credential.channel, ':briefcase:')
                     else:
                         #print('Case: ' + c)
-                        if en_log():
-                            log(local_date+ '['+str(i)+']Case:' + c+'\n')
+                        log(local_date+ '['+str(i)+'] Case:' + c+'\n')
                 except TypeError:
                     #print('No Case ID')
-                    if en_log():
-                        log(local_date+'['+str(i)+']No Case ID\n')
+                    log(local_date+'['+str(i)+'] No Case ID\n')
 
 # Slack Alerts
 def slack(message, channel, icon):
@@ -220,20 +230,17 @@ def mailbox():
     try:
         mail.login(EMAIL_ID,FROM_PWD)
     except:
-        if en_log():
-            log('Unable to connect! Check Credentials\n')
+        log('Unable to connect! Check Credentials\n')
         sys.exit()
 
 # Connect to SF:
 while True:
     if is_connected():
         sf()
-        if en_log():
-            #log('Fetched results from SalesForce\n'+'Total Cases: '+str(len(CASES_LIST))+' => ' +str(CASES_LIST).strip('[]')+'\n')
-            log('Fetched results from SalesForce\n')
+        #log('Fetched results from SalesForce\n'+'Total Cases: '+str(len(CASES_LIST))+' => ' +str(CASES_LIST).strip('[]')+'\n')
+        log('Fetched results from SalesForce\n')
         mailbox()
-        if en_log():
-            log('Connected to the Mail Server!\n')
+        log('Connected to the Mail Server!\n')
         break
     else:
         is_connected()
@@ -241,18 +248,16 @@ while True:
 read_a()
 d = 0
 
-if en_log():
-    for i in range(len(CASES_DATA)):
-        log(CASES_DATA[i][0] + ': ' + str(len(CASES_DATA[i][2]))+'\n')
+for i in range(len(CASES_DATA)):
+    log(CASES_DATA[i][0] + ': ' + str(len(CASES_DATA[i][2]))+'\n')
 
 # Main Loop
 while True:
     d += 1
     if d == 10:
         sf()
-        if en_log():
-            #log('SF info retreived: Total Cases: '+str(len(CASES_LIST))+'\n')
-            log('SF info retreived.\n')
+        #log('SF info retreived: Total Cases: '+str(len(CASES_LIST))+'\n')
+        log('SF info retreived.\n')
         d = 0
     try:
         if is_connected():
@@ -265,14 +270,12 @@ while True:
                 a = b
             time.sleep(30)
         else:
-            if en_log():
-                log('Error: Internet Connection down, Retrying after 60 seconds\n')
+            log('Error: Internet Connection down, Retrying after 60 seconds\n')
             continue
             time.sleep(60)
     except KeyboardInterrupt:
         mail.logout()
-        if en_log():
-            log('Process Killed by Keyboard\n')
+        log('Process Killed by Keyboard\n')
         sys.exit()
     except:
         traceback.print_exc()
